@@ -2,9 +2,8 @@ import AppKit
 
 // NoSleep Pro — app icon generator.
 //
-// Concept (informed by design references on Mobbin — Atoms/Peanut's bold bolt mark and
-// Moonly/(Not Boring)'s premium glossy-gradient squircle): a warm amber thunderbolt with
-// an electric bloom, sitting on a deep indigo→violet gradient squircle. Energy, at night.
+// A smooth, rounded electric-blue thunderbolt with a cyan bloom, on a deep indigo-navy
+// glossy squircle. Energy, at night.
 //
 // Usage:  swift generate_icon.swift [output.iconset]
 
@@ -14,31 +13,37 @@ func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor 
     CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [r, g, b, a])!
 }
 
-let bgTop    = rgb(0.13, 0.12, 0.34)   // deep indigo
-let bgMid    = rgb(0.30, 0.13, 0.60)   // royal violet
-let bgBottom = rgb(0.52, 0.26, 0.95)   // electric violet
+let bgTop    = rgb(0.055, 0.086, 0.200)   // deep indigo-navy
+let bgMid    = rgb(0.090, 0.140, 0.290)   // navy blue
+let bgBottom = rgb(0.150, 0.230, 0.470)   // brighter blue
 
-let boltTop    = rgb(1.00, 0.90, 0.32)  // bright yellow
-let boltMid    = rgb(1.00, 0.74, 0.16)  // amber
-let boltBottom = rgb(1.00, 0.53, 0.08)  // deep amber
+let boltTop    = rgb(0.72, 0.94, 1.00)    // pale cyan
+let boltMid    = rgb(0.24, 0.72, 0.98)    // sky blue
+let boltBottom = rgb(0.15, 0.45, 0.96)    // electric blue
+let glowColor  = rgb(0.30, 0.76, 1.00, 1) // cyan bloom
 
 // MARK: - Bolt geometry (normalised 0…1, y up)
 
 let bolt: [(CGFloat, CGFloat)] = [
     (0.615, 0.930),   // apex
-    (0.300, 0.520),   // left shoulder
-    (0.500, 0.520),
-    (0.400, 0.070),   // bottom tip
-    (0.705, 0.485),   // right shoulder
+    (0.315, 0.520),   // left shoulder
+    (0.495, 0.520),
+    (0.405, 0.075),   // bottom tip
+    (0.690, 0.485),   // right shoulder
     (0.505, 0.485),
 ]
 
-func boltPath(in rect: CGRect) -> CGPath {
+/// A rounded polygon: each vertex is filleted with `radius` using tangent arcs, giving the
+/// bolt smooth corners instead of hard points. CoreGraphics clamps the radius on short edges.
+func boltPath(in rect: CGRect, radius: CGFloat) -> CGPath {
+    let pts = bolt.map { CGPoint(x: rect.minX + $0.0 * rect.width,
+                                 y: rect.minY + $0.1 * rect.height) }
+    let n = pts.count
     let path = CGMutablePath()
-    for (i, p) in bolt.enumerated() {
-        let pt = CGPoint(x: rect.minX + p.0 * rect.width,
-                         y: rect.minY + p.1 * rect.height)
-        if i == 0 { path.move(to: pt) } else { path.addLine(to: pt) }
+    func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+    path.move(to: mid(pts[0], pts[1]))
+    for i in 1...n {
+        path.addArc(tangent1End: pts[i % n], tangent2End: pts[(i + 1) % n], radius: radius)
     }
     path.closeSubpath()
     return path
@@ -55,7 +60,7 @@ func drawIcon(size: CGFloat) -> NSImage {
     let cs = CGColorSpaceCreateDeviceRGB()
     let full = CGRect(x: 0, y: 0, width: size, height: size)
 
-    // Rounded-rect "squircle" body (Apple icon grid: ~18.75% inset, ~22% radius).
+    // Rounded-rect "squircle" body (Apple icon grid).
     let inset = size * 0.085
     let body = full.insetBy(dx: inset, dy: inset)
     let radius = body.width * 0.235
@@ -64,8 +69,7 @@ func drawIcon(size: CGFloat) -> NSImage {
     // Drop shadow beneath the body.
     ctx.saveGState()
     ctx.setShadow(offset: CGSize(width: 0, height: -size * 0.012),
-                  blur: size * 0.045,
-                  color: rgb(0, 0, 0, 0.40))
+                  blur: size * 0.045, color: rgb(0, 0, 0, 0.40))
     ctx.setFillColor(bgMid)
     ctx.addPath(bodyPath)
     ctx.fillPath()
@@ -82,38 +86,36 @@ func drawIcon(size: CGFloat) -> NSImage {
                                end: CGPoint(x: body.maxX, y: body.minY),
                                options: [])
     }
-
-    // Soft glossy sheen across the top third.
+    // Soft glossy sheen across the top.
     if let sheen = CGGradient(colorsSpace: cs,
-                              colors: [rgb(1, 1, 1, 0.16), rgb(1, 1, 1, 0.0)] as CFArray,
+                              colors: [rgb(1, 1, 1, 0.14), rgb(1, 1, 1, 0.0)] as CFArray,
                               locations: [0.0, 1.0]) {
         ctx.drawLinearGradient(sheen,
                                start: CGPoint(x: body.midX, y: body.maxY),
                                end: CGPoint(x: body.midX, y: body.midY + body.height * 0.05),
                                options: [])
     }
-
-    // Electric bloom behind the bolt.
+    // Electric cyan bloom behind the bolt.
     let center = CGPoint(x: body.midX, y: body.midY + body.height * 0.02)
     if let glow = CGGradient(colorsSpace: cs,
-                             colors: [rgb(1.0, 0.86, 0.35, 0.55),
-                                      rgb(1.0, 0.70, 0.20, 0.20),
-                                      rgb(1.0, 0.70, 0.20, 0.0)] as CFArray,
+                             colors: [rgb(0.30, 0.76, 1.0, 0.55),
+                                      rgb(0.20, 0.55, 1.0, 0.18),
+                                      rgb(0.20, 0.55, 1.0, 0.0)] as CFArray,
                              locations: [0.0, 0.45, 1.0]) {
         ctx.drawRadialGradient(glow,
                                startCenter: center, startRadius: 0,
-                               endCenter: center, endRadius: body.width * 0.48,
+                               endCenter: center, endRadius: body.width * 0.46,
                                options: [])
     }
     ctx.restoreGState()
 
-    // The thunderbolt itself, inside the body rect (a touch narrower for margin).
-    let boltRect = body.insetBy(dx: body.width * 0.055, dy: body.height * 0.055)
-    let path = boltPath(in: boltRect)
+    // The thunderbolt — smaller (more breathing room) and with rounded corners.
+    let boltRect = body.insetBy(dx: body.width * 0.135, dy: body.height * 0.135)
+    let path = boltPath(in: boltRect, radius: boltRect.width * 0.022)
 
-    // Bolt glow / outer stroke for that "charged" edge.
+    // Bolt glow / soft charged edge.
     ctx.saveGState()
-    ctx.setShadow(offset: .zero, blur: size * 0.03, color: rgb(1.0, 0.80, 0.25, 0.85))
+    ctx.setShadow(offset: .zero, blur: size * 0.028, color: rgb(0.30, 0.78, 1.0, 0.85))
     ctx.setFillColor(boltMid)
     ctx.addPath(path)
     ctx.fillPath()
@@ -130,9 +132,9 @@ func drawIcon(size: CGFloat) -> NSImage {
                                end: CGPoint(x: boltRect.midX, y: boltRect.minY),
                                options: [])
     }
-    // Bright specular highlight along the upper-left facet.
+    // Specular highlight along the upper-left facet.
     if let hi = CGGradient(colorsSpace: cs,
-                           colors: [rgb(1, 1, 1, 0.55), rgb(1, 1, 1, 0.0)] as CFArray,
+                           colors: [rgb(1, 1, 1, 0.50), rgb(1, 1, 1, 0.0)] as CFArray,
                            locations: [0.0, 1.0]) {
         ctx.drawLinearGradient(hi,
                                start: CGPoint(x: boltRect.minX, y: boltRect.maxY),
@@ -145,7 +147,6 @@ func drawIcon(size: CGFloat) -> NSImage {
 }
 
 func png(_ image: NSImage, _ pixels: Int) -> Data {
-    // Render crisply at exact pixel dimensions.
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels,
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                isPlanar: false, colorSpaceName: .deviceRGB,
@@ -169,15 +170,12 @@ let specs: [(base: Int, scale: Int)] = [
     (16, 1), (16, 2), (32, 1), (32, 2),
     (128, 1), (128, 2), (256, 1), (256, 2), (512, 1), (512, 2),
 ]
-
 for spec in specs {
     let pixels = spec.base * spec.scale
     let suffix = spec.scale == 2 ? "@2x" : ""
     let name = "\(outDir)/icon_\(spec.base)x\(spec.base)\(suffix).png"
     try! png(drawIcon(size: CGFloat(pixels)), pixels).write(to: URL(fileURLWithPath: name))
 }
-
-// Also emit a standalone 1024 master for stores/README.
 try! png(drawIcon(size: 1024), 1024).write(to: URL(fileURLWithPath: "\(outDir)/../icon-1024.png"))
 
 print("Generated iconset at \(outDir)")

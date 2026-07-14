@@ -41,11 +41,11 @@ func drawCentered(_ string: String, size: CGFloat, weight: NSFont.Weight, color:
 }
 
 drawCentered("NoSleep Pro", size: 30, weight: .bold,
-             color: NSColor(red: 0.30, green: 0.13, blue: 0.60, alpha: 1), topInset: 34)
+             color: NSColor(red: 0.12, green: 0.25, blue: 0.69, alpha: 1), topInset: 34)
 drawCentered("Drag the app onto the Applications folder to install", size: 14, weight: .regular,
              color: NSColor(red: 0.42, green: 0.44, blue: 0.52, alpha: 1), topInset: 74)
 
-// Amber arrow between the two icons (icons sit at x≈150 and x≈450 points, y≈200 from top).
+// Electric-blue arrow between the two icons (icons sit at x≈150 and x≈450 points, y≈200 from top).
 // In this y-up canvas that vertical center is H - 200*s = 400.
 let midY: CGFloat = H - 200 * s
 let x0: CGFloat = 246 * s   // just right of the app icon
@@ -53,9 +53,9 @@ let x1: CGFloat = 354 * s   // just left of the Applications folder
 let shaftH: CGFloat = 10 * s
 let headW: CGFloat = 26 * s
 let headH: CGFloat = 30 * s
-let amber = rgb(1.0, 0.62, 0.11)
+let arrowColor = rgb(0.20, 0.60, 0.98)
 
-ctx.setFillColor(amber)
+ctx.setFillColor(arrowColor)
 // shaft
 ctx.fill(CGRect(x: x0, y: midY - shaftH / 2, width: (x1 - headW) - x0, height: shaftH))
 // head
