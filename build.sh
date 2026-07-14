@@ -26,14 +26,18 @@ swift "$ROOT/Icon/generate_icon.swift" "$ICONSET" >/dev/null
 iconutil -c icns "$ICONSET" -o "$RES/AppIcon.icns"
 
 echo "▸ Compiling Swift sources ($ARCH, macOS $DEPLOY_TARGET)…"
+# -O whole-module optimization, no debug info — smallest, fastest binary.
 swiftc \
-  -O \
+  -O -wmo -gnone \
   -target "${ARCH}-apple-macosx${DEPLOY_TARGET}" \
   -framework AppKit \
   -framework IOKit \
   -framework ServiceManagement \
   -o "$MACOS_DIR/NoSleepPro" \
   "$ROOT/Sources/"*.swift
+
+echo "▸ Stripping symbols…"
+strip -x "$MACOS_DIR/NoSleepPro"
 
 echo "▸ Assembling bundle…"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"

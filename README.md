@@ -53,21 +53,34 @@ NoSleep Pro layers two mechanisms so it's reliable everywhere:
 
    That rule can *only* toggle sleep — nothing else — and is validated with `visudo` before it's ever installed. After that, every toggle is instant and silent. Remove it anytime from the menu (**Remove Closed-Lid Helper…**).
 
-**Safety:** NoSleep Pro always restores normal sleep when you quit, and defensively on launch. macOS also resets `disablesleep` on every reboot, so sleep can never get permanently stuck.
+**Safety:** The keep-awake assertion is released automatically the instant the app dies. Closed-lid mode (`disablesleep`) is reverted when you quit, defensively on every launch, and by macOS on reboot — so it can't get *permanently* stuck. (The one gap: a hard crash *while closed-lid mode is engaged* leaves sleep disabled until NoSleep Pro next launches — Launch at Login covers the next login — or you reboot.)
 
-## Build & install
+## Install
+
+**Option 1 — Download the DMG (easiest)**
+
+Grab the latest `NoSleepPro.dmg` from [**Releases**](../../releases), open it, and drag **NoSleep Pro** onto the **Applications** folder. Launch it from Spotlight or `/Applications` — look for the ⚡️ in your menu bar.
+
+**Option 2 — Build from source**
 
 Requires macOS 13+ and the Xcode command-line tools.
 
 ```bash
 git clone <this-repo>
 cd NoSleepPro
-./build.sh --install      # builds and copies NoSleep Pro to /Applications
+./build.sh --install      # compile, bundle, sign, and copy to /Applications
+./make_dmg.sh             # (optional) build a distributable NoSleepPro.dmg
 ```
 
-Then launch **NoSleep Pro** from Spotlight or `/Applications`. Look for the ⚡️ in your menu bar.
-
 > The build is ad-hoc signed for personal use. On first launch you may need to right-click the app → **Open**, or allow it under **System Settings → Privacy & Security**.
+
+## Footprint
+
+NoSleep Pro is built to stay out of your way:
+
+- **~7 MB** real memory (phys_footprint) — a fraction of a typical menu-bar app (30–100 MB) and a tiny sliver of an Electron one (150 MB+).
+- **0% CPU when idle** and **no polling timers** — it's fully event-driven, so it doesn't wake your CPU or drain battery while it sits there.
+- **~90 KB** binary, native AppKit, zero third-party dependencies.
 
 ### Verify it works
 

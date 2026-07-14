@@ -46,11 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         engine.onChange = { [weak self] in self?.refresh() }
         refresh()
-
-        // Refresh the icon/tooltip once a minute so a running timer's countdown stays current.
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
+        // No polling timer: the icon/tooltip update on state change (engine.onChange), and
+        // the menu rebuilds with a fresh, absolute end-time each time it opens. When a timer
+        // is running the one-shot expiry Timer flips us off. Result: zero idle wakeups.
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -266,9 +264,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             p.arguments = ["-g", "assertions"]
             let out = Pipe()
             p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
             try? p.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()   // drain before waiting
             p.waitUntilExit()
-            let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let text = String(data: data, encoding: .utf8) ?? ""
             return text.contains("NoSleep Pro")
         }
 

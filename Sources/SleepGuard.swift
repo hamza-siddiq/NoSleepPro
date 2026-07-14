@@ -17,8 +17,11 @@ import IOKit.pwr_mgt
 ///    a single `sudoers` rule limited to *exactly* `pmset disablesleep 1|0` and nothing
 ///    else. After that one-time approval every toggle is instant and silent.
 ///
-/// Safety: `disablesleep` is always reverted to `0` when the app quits, and defensively on
-/// launch. macOS also resets it automatically on reboot, so it can never get "stuck".
+/// Safety: the IOKit assertion is released automatically by the OS the instant the app dies.
+/// `disablesleep` is reverted to `0` on quit, defensively on every launch, and by macOS on
+/// reboot. The one uncovered case is a hard crash *while closed-lid mode is engaged* — sleep
+/// then stays disabled until NoSleep Pro next launches (Launch at Login covers the next login)
+/// or the Mac reboots.
 @MainActor
 final class SleepGuard {
     static let shared = SleepGuard()
@@ -42,12 +45,15 @@ final class SleepGuard {
     private var assertionID = IOPMAssertionID(0)
     private var hasAssertion = false
     private var timer: Timer?
+    private var lidSetupInFlight = false
 
     private init() {
         // Defensive: if a previous session crashed while sleep was disabled and the
         // password-less helper is present, silently restore normal sleep on launch.
+        // Done off the main thread so startup never blocks on `sudo` (slow on directory-
+        // bound Macs). `runSudoN` is nonisolated and touches no shared state.
         if helperInstalled {
-            _ = runSudoN(disable: false)
+            DispatchQueue.global(qos: .utility).async { [self] in _ = runSudoN(disable: false) }
         }
     }
 
@@ -86,7 +92,12 @@ final class SleepGuard {
     /// Turn keep-awake on. `minutes == nil` (or 0) means "until turned off".
     @discardableResult
     func activate(minutes: Int? = nil) -> Bool {
-        acquireAssertion()
+        guard acquireAssertion() else {
+            // The OS refused the power assertion — don't pretend we're keeping the Mac awake.
+            isActive = false
+            onChange?()
+            return false
+        }
         isActive = true
         scheduleExpiry(minutes: minutes)
         onChange?()   // light up the menu-bar bolt immediately, before any setup prompt
@@ -105,7 +116,9 @@ final class SleepGuard {
         cancelTimer()
         expiresAt = nil
         selectedTimerMinutes = nil
-        _ = runSudoN(disable: false)   // best-effort silent revert
+        if lidCloseEngaged {
+            _ = runSudoN(disable: false)   // only touch pmset if we actually disabled sleep
+        }
         lidCloseEngaged = false
         isActive = false
         onChange?()
@@ -114,10 +127,12 @@ final class SleepGuard {
 
     // MARK: - Status text
 
+    /// Absolute end-time (not a live countdown) so the status is always accurate without
+    /// any polling timer running in the background.
     var statusLine: String {
         guard isActive else { return "Your Mac sleeps normally" }
         if let expiresAt {
-            return "Awake for \(Self.shortRemaining(expiresAt.timeIntervalSinceNow)) more"
+            return "Awake until \(Self.timeFormatter.string(from: expiresAt))"
         }
         return lidCloseEngaged ? "Awake · lid can stay closed" : "Awake"
     }
@@ -128,7 +143,8 @@ final class SleepGuard {
 
     // MARK: - IOKit assertion (layer 1)
 
-    private func acquireAssertion() {
+    @discardableResult
+    private func acquireAssertion() -> Bool {
         releaseAssertion()
         let type = (keepDisplayAwake
             ? kIOPMAssertPreventUserIdleDisplaySleep
@@ -143,6 +159,7 @@ final class SleepGuard {
             assertionID = id
             hasAssertion = true
         }
+        return hasAssertion
     }
 
     private func releaseAssertion() {
@@ -177,15 +194,17 @@ final class SleepGuard {
         promptForLidCloseSetup()
     }
 
-    /// Run `sudo -n pmset disablesleep <1|0>`. Succeeds silently only when the
-    /// password-less helper is installed; otherwise returns false without prompting.
+    /// Run `sudo -n pmset disablesleep <1|0>`. Succeeds silently only when the password-less
+    /// helper is installed; otherwise returns false without prompting. `nonisolated` and
+    /// state-free, so it's safe to call from any thread (output goes to /dev/null — nothing
+    /// to drain, no deadlock risk).
     @discardableResult
-    private func runSudoN(disable: Bool) -> Bool {
+    nonisolated private func runSudoN(disable: Bool) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
         p.arguments = ["-n", "/usr/bin/pmset", "disablesleep", disable ? "1" : "0"]
-        p.standardOutput = Pipe()
-        p.standardError = Pipe()
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
         do {
             try p.run()
             p.waitUntilExit()
@@ -196,6 +215,8 @@ final class SleepGuard {
     }
 
     private func promptForLidCloseSetup() {
+        guard !lidSetupInFlight else { return }   // don't stack prompts / password panels
+
         let alert = NSAlert()
         alert.messageText = "Enable Closed-Lid Mode?"
         alert.informativeText = """
@@ -213,10 +234,17 @@ final class SleepGuard {
         alert.alertStyle = .informational
         NSApp.activate(ignoringOtherApps: true)
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            // Declined — stop offering closed-lid mode until they re-enable it from the menu,
+            // so a left-click or timer pick doesn't re-nag on every activation.
+            lidCloseMode = false
+            return
+        }
 
+        lidSetupInFlight = true
         installHelper { [weak self] ok in
             guard let self else { return }
+            self.lidSetupInFlight = false
             if ok, self.isActive, self.lidCloseMode {
                 self.lidCloseEngaged = self.runSudoN(disable: true)
             }
@@ -236,8 +264,14 @@ final class SleepGuard {
     /// Install the password-less `sudoers` drop-in via a single native admin prompt.
     func installHelper(completion: @escaping (Bool) -> Void) {
         // Capture the *original* user — the script runs as root, so `id -un` would be wrong.
-        let user = NSUserName().filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" || $0 == "." }
-        guard !user.isEmpty else { completion(false); return }
+        // Require the whole name to already be safe ASCII; bail rather than install a rule
+        // for a *different* (filtered) name that `sudo -n` would then never match.
+        let user = NSUserName()
+        let allowed = CharacterSet(charactersIn:
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+        guard !user.isEmpty, user.unicodeScalars.allSatisfy(allowed.contains) else {
+            completion(false); return
+        }
 
         let rule = "\(user) ALL=(root) NOPASSWD: /usr/bin/pmset disablesleep 1, /usr/bin/pmset disablesleep 0"
         let script = """
@@ -300,12 +334,13 @@ final class SleepGuard {
             p.arguments = ["-e", apple]
             let out = Pipe()
             p.standardOutput = out
-            p.standardError = Pipe()
+            p.standardError = FileHandle.nullDevice
             var ok = false
             do {
                 try p.run()
-                p.waitUntilExit()
+                // Drain the pipe *before* waiting so a large write can never deadlock us.
                 let data = out.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
                 let text = String(data: data, encoding: .utf8) ?? ""
                 ok = (p.terminationStatus == 0) && text.contains(marker)
             } catch {
@@ -340,12 +375,10 @@ final class SleepGuard {
 
     // MARK: - Helpers
 
-    private static func shortRemaining(_ seconds: TimeInterval) -> String {
-        let total = max(0, Int(seconds.rounded()))
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        if h > 0 { return m > 0 ? "\(h)h \(m)m" : "\(h)h" }
-        if m > 0 { return "\(m)m" }
-        return "<1m"
-    }
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short   // locale-aware, e.g. "3:45 PM" or "15:45"
+        f.dateStyle = .none
+        return f
+    }()
 }
