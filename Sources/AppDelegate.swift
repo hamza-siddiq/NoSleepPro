@@ -78,20 +78,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Icon
 
+    // Small, light-weight glyph so it sits quietly in the menu bar like a native item.
+    private let menuBarPointSize: CGFloat = 13
+
     private func refresh() {
         guard let button = statusItem.button else { return }
         if engine.isActive {
-            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-                .applying(.init(paletteColors: [NSColor.systemYellow]))
+            // Active: filled bolt in the native system blue (matches macOS accents).
+            let config = NSImage.SymbolConfiguration(pointSize: menuBarPointSize, weight: .regular)
+                .applying(.init(paletteColors: [NSColor.systemBlue]))
             let image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "Awake")?
                 .withSymbolConfiguration(config)
-            image?.isTemplate = false           // keep the amber colour — the bolt "pops"
+            image?.isTemplate = false           // keep the blue tint
             button.image = image
         } else {
-            let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+            // Idle: monochrome template outline — adapts to the light/dark menu bar, the way
+            // a native menu-bar app looks when it's not doing anything.
+            let config = NSImage.SymbolConfiguration(pointSize: menuBarPointSize, weight: .regular)
             let image = NSImage(systemSymbolName: "bolt", accessibilityDescription: "Sleep allowed")?
                 .withSymbolConfiguration(config)
-            image?.isTemplate = true            // adapts to light/dark menu bar
+            image?.isTemplate = true
             button.image = image
         }
         button.toolTip = engine.tooltip
